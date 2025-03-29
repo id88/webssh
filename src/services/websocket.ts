@@ -6,7 +6,7 @@ export class WebSocketService {
   private maxReconnectAttempts = 5
   private reconnectTimeout = 1000
   private url: string
-  private messageCallbacks: Map<string, (data: any) => void> = new Map()
+  private callbacks: Map<string, (data: any) => void> = new Map()
   private isDev = import.meta.env.DEV
 
   constructor() {
@@ -17,14 +17,14 @@ export class WebSocketService {
   }
 
   connect(): Promise<void> {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      console.log('WebSocket已经连接')
+      return Promise.resolve()
+    }
+
+    console.log('正在连接到WebSocket服务器...')
     return new Promise((resolve, reject) => {
       try {
-        if (this.ws?.readyState === WebSocket.OPEN) {
-          resolve()
-          return
-        }
-
-        console.log('正在连接到WebSocket服务器...')
         this.ws = new WebSocket(this.url)
 
         this.ws.onopen = () => {
@@ -33,13 +33,9 @@ export class WebSocketService {
           resolve()
         }
 
-        this.ws.onclose = (event) => {
-          console.log('WebSocket连接关闭:', {
-            code: event.code,
-            reason: event.reason,
-            wasClean: event.wasClean
-          })
-          this.handleReconnect()
+        this.ws.onclose = () => {
+          console.log('WebSocket连接关闭')
+          this.ws = null
         }
 
         this.ws.onerror = (error) => {
@@ -47,48 +43,7 @@ export class WebSocketService {
           reject(error)
         }
 
-        this.ws.onmessage = (event) => {
-          try {
-            const message = JSON.parse(event.data)
-            if (this.isDev) {
-              console.debug('收到WebSocket消息:', message)
-            }
-
-            // 处理系统消息
-            if (message.sessionId === 'system') {
-              const callback = this.messageCallbacks.get('system')
-              if (callback) {
-                callback(message.data || message)
-              }
-              return
-            }
-
-            // 处理错误消息
-            if (message.type === 'error') {
-              console.error('服务器错误:', message.message)
-              const sessionCallback = this.messageCallbacks.get(message.sessionId)
-              if (sessionCallback) {
-                sessionCallback(message)
-              } else {
-                // 如果没有找到对应的会话回调，通知所有回调
-                this.messageCallbacks.forEach(callback => {
-                  callback({ type: 'error', message: message.message })
-                })
-              }
-              return
-            }
-
-            // 处理会话消息
-            const callback = this.messageCallbacks.get(message.sessionId)
-            if (callback) {
-              callback(message)
-            } else if (this.isDev) {
-              console.debug('未找到会话回调，可能是会话尚未完全建立:', message.sessionId)
-            }
-          } catch (error) {
-            console.error('处理消息时出错:', error, '原始消息:', event.data)
-          }
-        }
+        this.ws.onmessage = this.handleMessage.bind(this)
       } catch (error) {
         console.error('创建WebSocket连接失败:', error)
         reject(error)
@@ -114,35 +69,31 @@ export class WebSocketService {
     }
   }
 
-  send(message: any) {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      throw new Error('WebSocket未连接')
-    }
-
-    try {
-      const data = JSON.stringify(message)
-      if (this.isDev) {
-        console.debug('发送WebSocket消息:', message)
-      }
-      this.ws.send(data)
-    } catch (error) {
-      console.error('发送消息失败:', error)
-      throw error
+  send(data: any) {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      const message = JSON.stringify(data)
+      console.log('发送WebSocket消息:', data)
+      this.ws.send(message)
+    } else {
+      console.error('WebSocket未连接')
     }
   }
 
   registerCallback(sessionId: string, callback: (data: any) => void) {
-    if (this.isDev) {
-      console.log('注册会话回调:', sessionId)
-    }
-    this.messageCallbacks.set(sessionId, callback)
+    console.log('注册回调:', {
+      sessionId,
+      existingCallbacks: Array.from(this.callbacks.keys())
+    })
+    this.callbacks.set(sessionId, callback)
   }
 
   unregisterCallback(sessionId: string) {
-    if (this.isDev) {
-      console.log('注销会话回调:', sessionId)
-    }
-    this.messageCallbacks.delete(sessionId)
+    console.log('注销回调:', {
+      sessionId,
+      hadCallback: this.callbacks.has(sessionId),
+      remainingCallbacks: Array.from(this.callbacks.keys()).filter(id => id !== sessionId)
+    })
+    this.callbacks.delete(sessionId)
   }
 
   close() {
@@ -150,7 +101,38 @@ export class WebSocketService {
       console.log('关闭WebSocket连接')
       this.ws.close()
       this.ws = null
-      this.messageCallbacks.clear()
+      this.callbacks.clear()
+    }
+  }
+
+  private handleMessage(event: MessageEvent) {
+    try {
+      const message = JSON.parse(event.data)
+      console.log('WebSocket收到消息:', {
+        type: message.type,
+        sessionId: message.sessionId,
+        hasCallback: this.callbacks.has(message.sessionId),
+        hasWildcard: this.callbacks.has('*'),
+        registeredCallbacks: Array.from(this.callbacks.keys())
+      })
+
+      // 首先尝试使用通配符回调
+      const wildcardCallback = this.callbacks.get('*')
+      if (wildcardCallback) {
+        console.log('执行通配符回调')
+        wildcardCallback(message)
+      }
+
+      // 然后尝试使用特定会话的回调
+      const callback = this.callbacks.get(message.sessionId)
+      if (callback) {
+        console.log('执行会话回调:', message.sessionId)
+        callback(message)
+      } else if (message.sessionId !== 'system') {
+        console.log('未找到会话回调，可能是会话尚未完全建立:', message.sessionId)
+      }
+    } catch (error) {
+      console.error('处理WebSocket消息时出错:', error)
     }
   }
 }

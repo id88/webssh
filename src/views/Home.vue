@@ -135,24 +135,74 @@ const handleConnect = async (config: {
       }, 10000) // 10秒超时
 
       const cleanup = (removeServerCallback = false) => {
+        console.log('清理回调函数:', {
+          system: true,
+          clientId: clientSessionId,
+          wildcard: true,
+          server: removeServerCallback ? serverSessionId : undefined
+        })
         clearTimeout(timeout)
-        wsService.unregisterCallback('system')
-        wsService.unregisterCallback(clientSessionId)
-        wsService.unregisterCallback('*')
+        // 按照注册的相反顺序清理回调
         if (removeServerCallback && serverSessionId) {
           wsService.unregisterCallback(serverSessionId)
         }
+        wsService.unregisterCallback('*')
+        wsService.unregisterCallback(clientSessionId)
+        wsService.unregisterCallback('system')
       }
 
-      // 注册系统消息回调
+      // 首先注册通配符回调，确保能捕获所有消息
+      console.log('注册通配符回调')
+      wsService.registerCallback('*', (message) => {
+        console.log('通配符回调触发:', {
+          type: message.type,
+          sessionId: message.sessionId,
+          isSystemMessage: message.sessionId === 'system',
+          isDataMessage: message.type === 'data',
+          hasContent: !!(message.data || message.content),
+          contentLength: (message.data || message.content || '').length
+        })
+
+        // 将所有非系统消息都存入缓冲区
+        if (message.type === 'data' && message.sessionId !== 'system') {
+          console.log('添加消息到缓冲区:', {
+            sessionId: message.sessionId,
+            contentPreview: (message.data || message.content || '').substring(0, 50)
+          })
+          messageBuffer.push(message)
+          console.log('当前缓冲区状态:', {
+            totalMessages: messageBuffer.length,
+            messageSessionIds: messageBuffer.map(m => m.sessionId)
+          })
+        }
+      })
+
+      // 然后注册临时回调
+      console.log('注册临时回调:', clientSessionId)
+      wsService.registerCallback(clientSessionId, (message) => {
+        console.log('收到临时消息:', {
+          type: message.type,
+          sessionId: message.sessionId,
+          dataLength: message.data?.length || message.content?.length || 0,
+          data: message.data || message.content
+        })
+        if (message.type === 'data') {
+          messageBuffer.push(message)
+        }
+      })
+
+      // 最后注册系统消息回调
+      console.log('注册系统消息回调')
       wsService.registerCallback('system', (data) => {
+        console.log('收到系统消息:', data)
         if (data.type === 'error') {
           cleanup(true)
           reject(new Error(data.message))
-        } else if (data.sessionId) {
+        } else if (data.type === 'created' || (data.data && data.data.type === 'created')) {
           // 服务器返回了新的会话ID
-          serverSessionId = data.sessionId
-          console.log('服务器分配的会话ID:', serverSessionId)
+          const sessionData = data.data || data
+          serverSessionId = sessionData.sessionId
+          console.log('服务器分配会话ID:', serverSessionId)
           
           // 更新会话列表中的ID
           const session = { id: serverSessionId, title, buffer: [] }
@@ -168,20 +218,27 @@ const handleConnect = async (config: {
           activeSessionId.value = serverSessionId
 
           // 注册新的会话回调
+          console.log('注册会话回调:', serverSessionId)
           wsService.registerCallback(serverSessionId, (message) => {
             if (message.type === 'data') {
               const content = message.content || message.data
               if (typeof content === 'string') {
                 // 写入终端
                 if (activeSessionId.value === serverSessionId) {
-                    console.log(`写入终端 [${serverSessionId}]:`, content.length > 50 ? content.substring(0, 50) + '...' : content)
+                  console.log(`写入终端数据 [${serverSessionId}]:`, {
+                    length: content.length,
+                    preview: content.length > 50 ? content.substring(0, 50) + '...' : content
+                  })
                   terminalRef.value?.write(content)
                 }
                 // 保存到缓冲区
                 const session = sessions.value.find(s => s.id === serverSessionId)
                 if (session) {
                   session.buffer.push(content)
-                  console.log(`保存到缓冲区 [${serverSessionId}], 当前长度:`, session.buffer.length)
+                  console.log(`更新缓冲区 [${serverSessionId}]:`, {
+                    newLength: session.buffer.length,
+                    lastMessageLength: content.length
+                  })
                 }
               }
             } else if (message.type === 'error') {
@@ -191,26 +248,71 @@ const handleConnect = async (config: {
           })
           
           // 处理缓存的消息
-          console.log('处理缓存的消息:', messageBuffer.length, '条')
-          messageBuffer.forEach(message => {
-            if (message.type === 'data') {
+          console.log('准备处理缓存消息:', {
+            bufferSize: messageBuffer.length,
+            expectedSessionId: serverSessionId,
+            messageSessionIds: messageBuffer.map(m => m.sessionId)
+          })
+
+          // 先按时间顺序排序消息
+          const sortedMessages = messageBuffer.filter(message => {
+            const matches = message.type === 'data' && 
+              message.sessionId === serverSessionId &&
+              (message.data || message.content)
+            
+            console.log('过滤消息:', {
+              sessionId: message.sessionId,
+              matchesSessionId: message.sessionId === serverSessionId,
+              hasContent: !!(message.data || message.content),
+              isIncluded: matches
+            })
+            
+            return matches
+          })
+
+          console.log('过滤后的消息:', {
+            originalCount: messageBuffer.length,
+            filteredCount: sortedMessages.length,
+            sessionIds: sortedMessages.map(m => m.sessionId)
+          })
+
+          if (sortedMessages.length > 0) {
+            console.log(`开始处理 ${sortedMessages.length} 条消息`)
+            sortedMessages.forEach((message, index) => {
               const content = message.content || message.data
-              if (typeof content === 'string' && message.sessionId === serverSessionId) {
+              if (typeof content === 'string') {
+                console.log(`处理第 ${index + 1} 条消息:`, {
+                  sessionId: message.sessionId,
+                  contentLength: content.length,
+                  contentPreview: content.substring(0, 50)
+                })
+                
                 // 写入终端
                 if (activeSessionId.value === serverSessionId) {
-                  console.log(`写入缓存消息到终端 [${serverSessionId}]:`, content.length > 50 ? content.substring(0, 50) + '...' : content)
+                  console.log(`写入终端 [${index + 1}/${sortedMessages.length}]`)
                   terminalRef.value?.write(content)
                 }
+                
                 // 保存到缓冲区
                 const session = sessions.value.find(s => s.id === serverSessionId)
                 if (session) {
                   session.buffer.push(content)
-                  console.log(`保存缓存消息到缓冲区 [${serverSessionId}], 当前长度:`, session.buffer.length)
+                  console.log(`更新会话缓冲区 [${index + 1}/${sortedMessages.length}]:`, {
+                    sessionId: serverSessionId,
+                    newBufferSize: session.buffer.length
+                  })
                 }
               }
-            }
-          })
+            })
+          } else {
+            console.log('没有找到匹配的缓存消息:', {
+              expectedSessionId: serverSessionId,
+              availableSessionIds: [...new Set(messageBuffer.map(m => m.sessionId))]
+            })
+          }
+          
           messageBuffer.length = 0 // 清空缓存
+          console.log('缓冲区已清空')
           
           // 只清理临时回调，保留服务器会话回调
           cleanup(false)
@@ -218,21 +320,12 @@ const handleConnect = async (config: {
         }
       })
 
-      // 注册临时回调来捕获早期消息
-      wsService.registerCallback(clientSessionId, (message) => {
-        console.log('收到临时消息:', message)
-        messageBuffer.push(message)
-      })
-
-      // 注册临时回调来捕获可能的早期服务器会话消息
-      wsService.registerCallback('*', (message) => {
-        if (message.sessionId && message.sessionId !== 'system' && message.sessionId !== clientSessionId) {
-          console.log('收到通配符消息:', message)
-          messageBuffer.push(message)
-        }
-      })
-
       // 发送创建会话请求
+      console.log('发送创建会话请求:', {
+        clientSessionId,
+        host: config.host,
+        username: config.username
+      })
       wsService.send({
         type: 'create',
         sessionId: clientSessionId,
