@@ -64,25 +64,26 @@ export class WebSocketService {
   private handleReconnect() {
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++
-      console.log(`准备第 ${this.reconnectAttempts} 次重连...`, {
-        timestamp: new Date().toISOString(),
-        maxAttempts: this.maxReconnectAttempts,
-        timeout: this.reconnectTimeout * this.reconnectAttempts
-      })
+      if (this.isDev) {
+        console.log(`准备第 ${this.reconnectAttempts} 次重连...`, {
+          maxAttempts: this.maxReconnectAttempts,
+          timeout: this.reconnectTimeout * this.reconnectAttempts
+        })
+      }
       
       setTimeout(() => {
-        console.log(`执行第 ${this.reconnectAttempts} 次重连`)
+        if (this.isDev) {
+          console.log(`执行第 ${this.reconnectAttempts} 次重连`)
+        }
         this.connect().catch((error) => {
           console.error(`WebSocket重连失败 (${this.reconnectAttempts}/${this.maxReconnectAttempts}):`, {
-            error,
-            timestamp: new Date().toISOString()
+            error
           })
         })
       }, this.reconnectTimeout * this.reconnectAttempts)
     } else {
       console.error('达到最大重连次数，停止重连', {
-        attempts: this.reconnectAttempts,
-        timestamp: new Date().toISOString()
+        attempts: this.reconnectAttempts
       })
       // 通知系统回调
       const systemCallback = this.callbacks.get('system')
@@ -98,16 +99,18 @@ export class WebSocketService {
 
   send(data: any) {
     if (this.isConnected()) {
+      if (this.isDev) {
+        console.log('发送WebSocket消息:', {
+          type: data.type,
+          sessionId: data.sessionId
+        })
+      }
       const message = JSON.stringify(data)
-      console.log('发送WebSocket消息:', {
-        ...data,
-        timestamp: new Date().toISOString()
-      })
       this.ws!.send(message)
     } else {
       console.error('WebSocket未连接，无法发送消息:', {
-        data,
-        timestamp: new Date().toISOString(),
+        type: data.type,
+        sessionId: data.sessionId,
         reconnectAttempts: this.reconnectAttempts
       })
       // 尝试重新连接
@@ -118,19 +121,23 @@ export class WebSocketService {
   }
 
   registerCallback(sessionId: string, callback: (data: any) => void) {
-    console.log('注册回调:', {
-      sessionId,
-      existingCallbacks: Array.from(this.callbacks.keys())
-    })
+    if (this.isDev) {
+      console.log('注册回调:', {
+        sessionId,
+        existingCallbacks: Array.from(this.callbacks.keys())
+      })
+    }
     this.callbacks.set(sessionId, callback)
   }
 
   unregisterCallback(sessionId: string) {
-    console.log('注销回调:', {
-      sessionId,
-      hadCallback: this.callbacks.has(sessionId),
-      remainingCallbacks: Array.from(this.callbacks.keys()).filter(id => id !== sessionId)
-    })
+    if (this.isDev) {
+      console.log('注销回调:', {
+        sessionId,
+        hadCallback: this.callbacks.has(sessionId),
+        remainingCallbacks: Array.from(this.callbacks.keys()).filter(id => id !== sessionId)
+      })
+    }
     this.callbacks.delete(sessionId)
   }
 
@@ -146,22 +153,20 @@ export class WebSocketService {
   private handleMessage(event: MessageEvent) {
     try {
       const message = JSON.parse(event.data)
-      console.log('WebSocket收到消息:', {
-        type: message.type,
-        sessionId: message.sessionId,
-        hasCallback: this.callbacks.has(message.sessionId),
-        hasWildcard: this.callbacks.has('*'),
-        registeredCallbacks: Array.from(this.callbacks.keys()),
-        timestamp: new Date().toISOString(),
-        connectionState: this.isConnected()
-      })
+      if (this.isDev) {
+        console.log('WebSocket收到消息:', {
+          type: message.type,
+          sessionId: message.sessionId,
+          hasCallback: this.callbacks.has(message.sessionId),
+          hasWildcard: this.callbacks.has('*')
+        })
+      }
 
       // 检查是否是错误消息
       if (message.type === 'error') {
         console.error('收到错误消息:', {
           message: message.message,
-          sessionId: message.sessionId,
-          timestamp: new Date().toISOString()
+          sessionId: message.sessionId
         })
         
         // 如果是认证相关的错误，不要断开WebSocket连接
@@ -181,22 +186,27 @@ export class WebSocketService {
       // 首先尝试使用通配符回调
       const wildcardCallback = this.callbacks.get('*')
       if (wildcardCallback) {
-        console.log('执行通配符回调')
+        if (this.isDev) {
+          console.log('执行通配符回调')
+        }
         wildcardCallback(message)
       }
 
       // 然后尝试使用特定会话的回调
       const callback = this.callbacks.get(message.sessionId)
       if (callback) {
-        console.log('执行会话回调:', message.sessionId)
+        if (this.isDev) {
+          console.log('执行会话回调:', message.sessionId)
+        }
         callback(message)
       } else if (message.sessionId !== 'system') {
-        console.log('未找到会话回调，可能是会话尚未完全建立:', message.sessionId)
+        if (this.isDev) {
+          console.log('未找到会话回调，可能是会话尚未完全建立:', message.sessionId)
+        }
       }
     } catch (error) {
       console.error('处理WebSocket消息时出错:', {
         error,
-        timestamp: new Date().toISOString(),
         wsState: this.isConnected()
       })
     }

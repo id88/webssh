@@ -28,19 +28,18 @@ export class SSHService extends EventEmitter {
   private setupClientEvents() {
     this.client
       .on('handshake', (negotiated) => {
-        console.log('SSH握手完成:', {
-          host: this.config.host,
-          username: this.config.username,
-          algorithms: negotiated,
-          timestamp: new Date().toISOString()
-        })
+        if (this.isDev) {
+          console.log('SSH握手完成:', {
+            host: this.config.host,
+            username: this.config.username
+          })
+        }
       })
       .on('ready', () => {
         if (this.isDev) {
           console.log('SSH连接就绪:', {
             host: this.config.host,
-            username: this.config.username,
-            timestamp: new Date().toISOString()
+            username: this.config.username
           })
         }
         this.isConnected = true
@@ -52,9 +51,7 @@ export class SSHService extends EventEmitter {
           message: err.message,
           level: err.level,
           code: err.code,
-          host: this.config.host,
-          username: this.config.username,
-          timestamp: new Date().toISOString()
+          host: this.config.host
         })
         this.isConnected = false
         this.clearConnectTimeout()
@@ -71,21 +68,21 @@ export class SSHService extends EventEmitter {
         }
       })
       .once('close', () => {
-        console.log('SSH连接关闭:', {
-          host: this.config.host,
-          username: this.config.username,
-          timestamp: new Date().toISOString()
-        })
+        if (this.isDev) {
+          console.log('SSH连接关闭:', {
+            host: this.config.host
+          })
+        }
         this.isConnected = false
         this.clearConnectTimeout()
         this.emit('close')
       })
       .on('end', () => {
-        console.log('SSH连接结束:', {
-          host: this.config.host,
-          username: this.config.username,
-          timestamp: new Date().toISOString()
-        })
+        if (this.isDev) {
+          console.log('SSH连接结束:', {
+            host: this.config.host
+          })
+        }
         this.isConnected = false
         this.clearConnectTimeout()
         this.emit('end')
@@ -106,20 +103,19 @@ export class SSHService extends EventEmitter {
         const error = new Error('SSH连接超时：服务器无响应')
         console.error('SSH连接超时:', {
           host: this.config.host,
-          username: this.config.username,
-          timeout: this.CONNECT_TIMEOUT,
-          timestamp: new Date().toISOString()
+          timeout: this.CONNECT_TIMEOUT
         })
         this.client.end()
         reject(error)
       }, this.CONNECT_TIMEOUT)
 
       try {
-        console.log('开始SSH连接:', {
-          host: this.config.host,
-          username: this.config.username,
-          timestamp: new Date().toISOString()
-        })
+        if (this.isDev) {
+          console.log('开始SSH连接:', {
+            host: this.config.host,
+            username: this.config.username
+          })
+        }
 
         this.client.connect({
           host: this.config.host,
@@ -127,15 +123,12 @@ export class SSHService extends EventEmitter {
           username: this.config.username,
           password: this.config.password,
           readyTimeout: this.HANDSHAKE_TIMEOUT,
-          debug: (debug: string) => {
-            if (this.isDev) {
-              console.log('SSH Debug:', {
-                message: debug,
-                host: this.config.host,
-                timestamp: new Date().toISOString()
-              })
-            }
-          }
+          debug: this.isDev ? (debug: string) => {
+            console.log('SSH Debug:', {
+              message: debug,
+              host: this.config.host
+            })
+          } : undefined
         })
 
         this.client.once('ready', () => {

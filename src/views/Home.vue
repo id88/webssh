@@ -117,20 +117,16 @@ const handleConnect = async (config: {
   password: string
 }) => {
   try {
-    console.log('开始创建新会话:', {
-      host: config.host,
-      port: config.port,
-      username: config.username,
-      timestamp: new Date().toISOString()
-    })
-    
-    // 确保WebSocket已连接
-    console.log('正在确保WebSocket连接...')
-    await wsService.connect()
-    console.log('WebSocket连接状态:', wsService.isConnected())
+    console.log('开始创建新的SSH会话')
 
-    // 创建新会话
-    const clientSessionId = uuidv4()
+    // 检查WebSocket连接状态
+    if (!wsService.isConnected()) {
+      console.log('WebSocket未连接，尝试重新连接')
+      await wsService.connect()
+    }
+
+    // 创建新的SSH会话
+    const sessionId = uuidv4()
     const title = `${config.username}@${config.host}:${config.port}`
     let serverSessionId = ''
     const messageBuffer: any[] = [] // 用于缓存早期消息
@@ -147,7 +143,7 @@ const handleConnect = async (config: {
           isAuthError
         })
         reject(new Error('会话创建超时'))
-      }, 10000) // 10秒超时
+      }, 30000) // 30秒超时
 
       const cleanup = (removeServerCallback = false) => {
         console.log('执行清理操作:', {
@@ -163,7 +159,7 @@ const handleConnect = async (config: {
           wsService.unregisterCallback(serverSessionId)
         }
         wsService.unregisterCallback('*')
-        wsService.unregisterCallback(clientSessionId)
+        wsService.unregisterCallback(sessionId)
         wsService.unregisterCallback('system')
       }
 
@@ -186,8 +182,8 @@ const handleConnect = async (config: {
       })
 
       // 然后注册临时回调
-      console.log('注册临时回调:', clientSessionId)
-      wsService.registerCallback(clientSessionId, (message) => {
+      console.log('注册临时回调:', sessionId)
+      wsService.registerCallback(sessionId, (message) => {
         console.log('收到临时消息:', {
           type: message.type,
           sessionId: message.sessionId,
@@ -354,13 +350,13 @@ const handleConnect = async (config: {
 
       // 发送创建会话请求
       console.log('发送创建会话请求:', {
-        clientSessionId,
+        sessionId,
         host: config.host,
         username: config.username
       })
       wsService.send({
         type: 'create',
-        sessionId: clientSessionId,
+        sessionId,
         config
       })
     })
@@ -369,7 +365,10 @@ const handleConnect = async (config: {
     await sessionCreated
     showConnectionDialog.value = false
   } catch (error) {
-    console.error('连接失败:', error)
+    console.error('创建SSH会话时出错:', {
+      error,
+      wsState: wsService.isConnected()
+    })
     ElMessage.error(error instanceof Error ? error.message : '连接失败')
   }
 }

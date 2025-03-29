@@ -85,12 +85,12 @@ export class WebSocketService {
   private async handleCreate(ws: WebSocket, config: SSHConfig) {
     try {
       const sessionId = uuidv4()
-      console.log('开始创建SSH会话:', {
-        sessionId,
-        host: config.host,
-        username: config.username,
-        timestamp: new Date().toISOString()
-      })
+      if (this.isDev) {
+        console.log('开始创建SSH会话:', {
+          sessionId,
+          host: config.host
+        })
+      }
 
       const ssh = new SSHService(config)
 
@@ -102,8 +102,7 @@ export class WebSocketService {
       ssh.on('error', (error: Error) => {
         console.error('SSH会话错误:', {
           sessionId,
-          error: error.message,
-          timestamp: new Date().toISOString()
+          error: error.message
         })
 
         // 发送错误消息到客户端
@@ -114,31 +113,32 @@ export class WebSocketService {
             error.message.includes('authentication') ||
             error.message.includes('超时') ||
             error.message.includes('timeout')) {
-          console.log('SSH认证失败或超时，清理会话:', {
-            sessionId,
-            error: error.message,
-            timestamp: new Date().toISOString()
-          })
+          if (this.isDev) {
+            console.log('SSH认证失败或超时，清理会话:', {
+              sessionId,
+              error: error.message
+            })
+          }
           this.handleDisconnect(sessionId)
         }
       })
 
       // 尝试建立SSH连接
-      console.log('尝试建立SSH连接:', {
-        sessionId,
-        host: config.host,
-        username: config.username,
-        timestamp: new Date().toISOString()
-      })
+      if (this.isDev) {
+        console.log('尝试建立SSH连接:', {
+          sessionId,
+          host: config.host
+        })
+      }
 
       await ssh.connect()
       
-      console.log('SSH连接成功，准备创建Shell:', {
-        sessionId,
-        host: config.host,
-        username: config.username,
-        timestamp: new Date().toISOString()
-      })
+      if (this.isDev) {
+        console.log('SSH连接成功，准备创建Shell:', {
+          sessionId,
+          host: config.host
+        })
+      }
 
       // 连接成功后再创建shell
       await ssh.shell({ rows: 24, cols: 80 })
@@ -147,17 +147,16 @@ export class WebSocketService {
       this.sessions.set(sessionId, { ws, ssh })
       this.sendData(ws, 'system', { type: 'created', sessionId })
       
-      console.log('SSH会话创建完成:', {
-        sessionId,
-        host: config.host,
-        username: config.username,
-        timestamp: new Date().toISOString()
-      })
+      if (this.isDev) {
+        console.log('SSH会话创建完成:', {
+          sessionId,
+          host: config.host
+        })
+      }
     } catch (error) {
       console.error('创建SSH会话失败:', {
         error: error instanceof Error ? error.message : error,
-        stack: error instanceof Error ? error.stack : undefined,
-        timestamp: new Date().toISOString()
+        stack: this.isDev ? (error instanceof Error ? error.stack : undefined) : undefined
       })
       this.sendError(ws, error instanceof Error ? error.message : '创建会话失败')
     }
@@ -180,20 +179,22 @@ export class WebSocketService {
   private handleDisconnect(sessionId: string) {
     const session = this.sessions.get(sessionId)
     if (session) {
-      console.log('断开SSH会话:', {
-        sessionId,
-        timestamp: new Date().toISOString()
-      })
+      if (this.isDev) {
+        console.log('断开SSH会话:', {
+          sessionId
+        })
+      }
       session.ssh.disconnect()
       this.sessions.delete(sessionId)
     }
   }
 
   private cleanupSessions(ws: WebSocket) {
-    console.log('清理WebSocket相关的所有会话:', {
-      activeSessions: this.sessions.size,
-      timestamp: new Date().toISOString()
-    })
+    if (this.isDev) {
+      console.log('清理WebSocket相关的会话:', {
+        activeSessions: this.sessions.size
+      })
+    }
     for (const [sessionId, session] of this.sessions) {
       if (session.ws === ws) {
         this.handleDisconnect(sessionId)
