@@ -37,7 +37,6 @@
       <el-main class="main-content">
         <div v-if="activeSessionId" class="terminal-wrapper">
           <Terminal
-            :key="activeSessionId"
             :session-id="activeSessionId"
             @data="handleTerminalData"
             @resize="handleTerminalResize"
@@ -66,7 +65,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { v4 as uuidv4 } from 'uuid'
 import Terminal from '@/components/terminal/Terminal.vue'
 import ConnectionForm from '@/components/connection/ConnectionForm.vue'
@@ -74,7 +73,7 @@ import { wsService } from '@/services/websocket'
 import { ElMessage } from 'element-plus'
 
 // 状态
-const sessions = ref<Array<{ id: string; title: string }>>([])
+const sessions = ref<Array<{ id: string; title: string; buffer: string[] }>>([])
 const activeSessionId = ref<string>('')
 const showConnectionDialog = ref(false)
 const terminalRef = ref()
@@ -84,6 +83,32 @@ const activeSession = computed(() =>
   sessions.value.find(s => s.id === activeSessionId.value)
 )
 
+// 监听会话切换
+watch(activeSessionId, (newId, oldId) => {
+  console.log('会话切换:', { oldId, newId })
+  if (newId && activeSession.value) {
+    // 恢复会话内容
+    const session = activeSession.value
+    console.log('当前会话信息:', {
+      id: session.id,
+      title: session.title,
+      bufferLength: session.buffer.length
+    })
+    // 总是清空终端内容
+    nextTick(() => {
+      console.log('清空终端内容')
+      terminalRef.value?.clear()
+      if (session.buffer.length > 0) {
+        console.log('准备恢复会话内容:', session.id)
+        session.buffer.forEach((content, index) => {
+          console.log(`写入内容 [${index}]:`, content.length > 50 ? content.substring(0, 50) + '...' : content)
+          terminalRef.value?.write(content)
+        })
+      }
+    })
+  }
+})
+
 // 连接处理
 const handleConnect = async (config: {
   host: string
@@ -92,6 +117,7 @@ const handleConnect = async (config: {
   password: string
 }) => {
   try {
+    console.log('开始创建新会话:', config.username + '@' + config.host)
     // 确保WebSocket已连接
     await wsService.connect()
 
@@ -129,8 +155,16 @@ const handleConnect = async (config: {
           console.log('服务器分配的会话ID:', serverSessionId)
           
           // 更新会话列表中的ID
-          const session = { id: serverSessionId, title }
+          const session = { id: serverSessionId, title, buffer: [] }
           sessions.value.push(session)
+          console.log('新会话已添加到列表:', {
+            id: session.id,
+            title: session.title,
+            totalSessions: sessions.value.length
+          })
+
+          // 切换到新会话
+          console.log('切换到新会话:', serverSessionId)
           activeSessionId.value = serverSessionId
 
           // 注册新的会话回调
@@ -138,7 +172,17 @@ const handleConnect = async (config: {
             if (message.type === 'data') {
               const content = message.content || message.data
               if (typeof content === 'string') {
-                terminalRef.value?.write(content)
+                // 写入终端
+                if (activeSessionId.value === serverSessionId) {
+                    console.log(`写入终端 [${serverSessionId}]:`, content.length > 50 ? content.substring(0, 50) + '...' : content)
+                  terminalRef.value?.write(content)
+                }
+                // 保存到缓冲区
+                const session = sessions.value.find(s => s.id === serverSessionId)
+                if (session) {
+                  session.buffer.push(content)
+                  console.log(`保存到缓冲区 [${serverSessionId}], 当前长度:`, session.buffer.length)
+                }
               }
             } else if (message.type === 'error') {
               console.error('SSH错误:', message.message)
@@ -152,7 +196,17 @@ const handleConnect = async (config: {
             if (message.type === 'data') {
               const content = message.content || message.data
               if (typeof content === 'string' && message.sessionId === serverSessionId) {
-                terminalRef.value?.write(content)
+                // 写入终端
+                if (activeSessionId.value === serverSessionId) {
+                  console.log(`写入缓存消息到终端 [${serverSessionId}]:`, content.length > 50 ? content.substring(0, 50) + '...' : content)
+                  terminalRef.value?.write(content)
+                }
+                // 保存到缓冲区
+                const session = sessions.value.find(s => s.id === serverSessionId)
+                if (session) {
+                  session.buffer.push(content)
+                  console.log(`保存缓存消息到缓冲区 [${serverSessionId}], 当前长度:`, session.buffer.length)
+                }
               }
             }
           })
@@ -166,12 +220,14 @@ const handleConnect = async (config: {
 
       // 注册临时回调来捕获早期消息
       wsService.registerCallback(clientSessionId, (message) => {
+        console.log('收到临时消息:', message)
         messageBuffer.push(message)
       })
 
       // 注册临时回调来捕获可能的早期服务器会话消息
       wsService.registerCallback('*', (message) => {
         if (message.sessionId && message.sessionId !== 'system' && message.sessionId !== clientSessionId) {
+          console.log('收到通配符消息:', message)
           messageBuffer.push(message)
         }
       })
@@ -195,15 +251,12 @@ const handleConnect = async (config: {
 
 // 会话管理
 const handleSessionSelect = (sessionId: string) => {
+  console.log('手动切换会话:', { from: activeSessionId.value, to: sessionId })
   activeSessionId.value = sessionId
 }
 
 const handleCloseSession = (sessionId: string) => {
-  // 先关闭终端
-  if (activeSessionId.value === sessionId) {
-    terminalRef.value?.clear()
-  }
-
+  console.log('关闭会话:', sessionId)
   // 发送断开连接请求
   wsService.send({
     type: 'disconnect',
@@ -217,17 +270,21 @@ const handleCloseSession = (sessionId: string) => {
   const index = sessions.value.findIndex(s => s.id === sessionId)
   if (index !== -1) {
     sessions.value.splice(index, 1)
+    console.log('会话已从列表中移除, 剩余会话:', sessions.value.length)
   }
 
   // 更新活动会话
   if (activeSessionId.value === sessionId) {
-    activeSessionId.value = sessions.value[0]?.id || ''
+    const newActiveId = sessions.value[0]?.id || ''
+    console.log('更新活动会话:', { from: sessionId, to: newActiveId })
+    activeSessionId.value = newActiveId
   }
 }
 
 // 终端事件处理
 const handleTerminalData = (data: string) => {
   if (activeSessionId.value) {
+    console.log(`发送终端数据 [${activeSessionId.value}]:`, data.length > 50 ? data.substring(0, 50) + '...' : data)
     wsService.send({
       type: 'data',
       sessionId: activeSessionId.value,
@@ -238,6 +295,7 @@ const handleTerminalData = (data: string) => {
 
 const handleTerminalResize = (size: { cols: number; rows: number }) => {
   if (activeSessionId.value) {
+    // console.log(`调整终端大小 [${activeSessionId.value}]:`, size)
     wsService.send({
       type: 'resize',
       sessionId: activeSessionId.value,
