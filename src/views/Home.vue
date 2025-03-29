@@ -151,7 +151,7 @@ const handleConnect = async (config: {
           messageBuffer.forEach(message => {
             if (message.type === 'data') {
               const content = message.content || message.data
-              if (typeof content === 'string') {
+              if (typeof content === 'string' && message.sessionId === serverSessionId) {
                 terminalRef.value?.write(content)
               }
             }
@@ -199,17 +199,27 @@ const handleSessionSelect = (sessionId: string) => {
 }
 
 const handleCloseSession = (sessionId: string) => {
+  // 先关闭终端
+  if (activeSessionId.value === sessionId) {
+    terminalRef.value?.clear()
+  }
+
+  // 发送断开连接请求
   wsService.send({
     type: 'disconnect',
     sessionId
   })
+
+  // 注销回调
   wsService.unregisterCallback(sessionId)
   
+  // 更新会话列表
   const index = sessions.value.findIndex(s => s.id === sessionId)
   if (index !== -1) {
     sessions.value.splice(index, 1)
   }
 
+  // 更新活动会话
   if (activeSessionId.value === sessionId) {
     activeSessionId.value = sessions.value[0]?.id || ''
   }

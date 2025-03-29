@@ -58,33 +58,67 @@ onMounted(() => {
   })
 
   // 监听窗口大小变化
-  const handleResize = () => {
-    if (fitAddon.value && term.value) {
-      fitAddon.value.fit()
-      const { cols, rows } = term.value
-      emit('resize', { cols, rows })
-    }
-  }
-
   window.addEventListener('resize', handleResize)
-
   // 初始化完成后触发一次 resize
   handleResize()
 })
 
+// 监听窗口大小变化
+const handleResize = () => {
+  if (fitAddon.value && term.value) {
+    try {
+      fitAddon.value.fit()
+      const { cols, rows } = term.value
+      emit('resize', { cols, rows })
+    } catch (error) {
+      console.debug('终端大小调整失败:', error)
+    }
+  }
+}
+
 // 清理
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', () => {})
-  term.value?.dispose()
+  // 移除resize事件监听器
+  window.removeEventListener('resize', handleResize)
+  
+  // 清理终端和插件
+  if (term.value) {
+    try {
+      // 先销毁终端实例
+      term.value.dispose()
+      // 再销毁插件
+      if (fitAddon.value) {
+        fitAddon.value.dispose()
+      }
+    } catch (error) {
+      console.debug('终端清理过程中出现错误:', error)
+    }
+  }
+
+  // 清空引用
+  term.value = undefined
+  fitAddon.value = undefined
 })
 
 // 暴露方法给父组件
 defineExpose({
   write: (data: string) => {
-    term.value?.write(data)
+    if (term.value && !term.value.element?.classList.contains('xterm-disposed')) {
+      try {
+        term.value.write(data)
+      } catch (error) {
+        console.debug('终端写入失败:', error)
+      }
+    }
   },
   clear: () => {
-    term.value?.clear()
+    if (term.value && !term.value.element?.classList.contains('xterm-disposed')) {
+      try {
+        term.value.clear()
+      } catch (error) {
+        console.debug('终端清理失败:', error)
+      }
+    }
   }
 })
 </script>
@@ -96,7 +130,7 @@ defineExpose({
   background-color: #1e1e1e;
   overflow: hidden;
   position: relative;
-  padding-left: 5px;
+  padding-left: 15px;
 }
 
 /* 确保xterm.js终端完全填充容器 */
