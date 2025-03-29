@@ -117,29 +117,45 @@ const handleConnect = async (config: {
   password: string
 }) => {
   try {
-    console.log('开始创建新会话:', config.username + '@' + config.host)
+    console.log('开始创建新会话:', {
+      host: config.host,
+      port: config.port,
+      username: config.username,
+      timestamp: new Date().toISOString()
+    })
+    
     // 确保WebSocket已连接
+    console.log('正在确保WebSocket连接...')
     await wsService.connect()
+    console.log('WebSocket连接状态:', wsService.isConnected())
 
     // 创建新会话
     const clientSessionId = uuidv4()
     const title = `${config.username}@${config.host}:${config.port}`
     let serverSessionId = ''
     const messageBuffer: any[] = [] // 用于缓存早期消息
+    let isAuthError = false // 标记是否是认证错误
     
     // 创建一个Promise来等待会话创建
     const sessionCreated = new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         cleanup(true)
+        console.error('会话创建超时，可能原因：', {
+          wsConnected: wsService.isConnected(),
+          hasServerResponse: !!serverSessionId,
+          bufferedMessages: messageBuffer.length,
+          isAuthError
+        })
         reject(new Error('会话创建超时'))
       }, 10000) // 10秒超时
 
       const cleanup = (removeServerCallback = false) => {
-        console.log('清理回调函数:', {
-          system: true,
-          clientId: clientSessionId,
-          wildcard: true,
-          server: removeServerCallback ? serverSessionId : undefined
+        console.log('执行清理操作:', {
+          removeServerCallback,
+          serverSessionId,
+          wsConnected: wsService.isConnected(),
+          timestamp: new Date().toISOString(),
+          isAuthError
         })
         clearTimeout(timeout)
         // 按照注册的相反顺序清理回调
@@ -154,26 +170,18 @@ const handleConnect = async (config: {
       // 首先注册通配符回调，确保能捕获所有消息
       console.log('注册通配符回调')
       wsService.registerCallback('*', (message) => {
-        console.log('通配符回调触发:', {
+        console.log('收到WebSocket消息:', {
           type: message.type,
           sessionId: message.sessionId,
-          isSystemMessage: message.sessionId === 'system',
-          isDataMessage: message.type === 'data',
-          hasContent: !!(message.data || message.content),
-          contentLength: (message.data || message.content || '').length
+          messageType: typeof message.data,
+          timestamp: new Date().toISOString(),
+          error: message.error,
+          errorMessage: message.message
         })
 
         // 将所有非系统消息都存入缓冲区
         if (message.type === 'data' && message.sessionId !== 'system') {
-          console.log('添加消息到缓冲区:', {
-            sessionId: message.sessionId,
-            contentPreview: (message.data || message.content || '').substring(0, 50)
-          })
           messageBuffer.push(message)
-          console.log('当前缓冲区状态:', {
-            totalMessages: messageBuffer.length,
-            messageSessionIds: messageBuffer.map(m => m.sessionId)
-          })
         }
       })
 
@@ -194,8 +202,32 @@ const handleConnect = async (config: {
       // 最后注册系统消息回调
       console.log('注册系统消息回调')
       wsService.registerCallback('system', (data) => {
-        console.log('收到系统消息:', data)
+        console.log('收到系统消息:', {
+          type: data.type,
+          message: data.message,
+          timestamp: new Date().toISOString(),
+          error: data.error,
+          wsConnected: wsService.isConnected()
+        })
+        
         if (data.type === 'error') {
+          console.error('SSH连接错误:', {
+            message: data.message,
+            wsState: wsService.isConnected(),
+            timestamp: new Date().toISOString()
+          })
+
+          // 对于认证错误，显示错误消息但保持对话框打开
+          if (data.message?.includes('认证失败') || 
+              data.message?.includes('authentication') ||
+              data.message?.includes('密码错误')) {
+            ElMessage.error(data.message)
+            cleanup(true)
+            reject(new Error(data.message))
+            return
+          }
+
+          // 其他错误按原有逻辑处理
           cleanup(true)
           reject(new Error(data.message))
         } else if (data.type === 'created' || (data.data && data.data.type === 'created')) {

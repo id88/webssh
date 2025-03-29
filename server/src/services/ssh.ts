@@ -2,12 +2,21 @@ import { Client } from 'ssh2'
 import { EventEmitter } from 'events'
 import { SSHConfig } from '../types'
 
+// 定义SSH错误类型
+interface SSHError extends Error {
+  level?: string
+  code?: string
+}
+
 export class SSHService extends EventEmitter {
   private client: Client
   private config: SSHConfig
   private stream: any
   private isConnected: boolean = false
   private isDev = process.env.NODE_ENV === 'development'
+  private connectTimeout: NodeJS.Timeout | null = null
+  private readonly CONNECT_TIMEOUT = 15000 // 增加到15秒
+  private readonly HANDSHAKE_TIMEOUT = 10000 // SSH握手超时时间
 
   constructor(config: SSHConfig) {
     super()
@@ -18,48 +27,127 @@ export class SSHService extends EventEmitter {
 
   private setupClientEvents() {
     this.client
+      .on('handshake', (negotiated) => {
+        console.log('SSH握手完成:', {
+          host: this.config.host,
+          username: this.config.username,
+          algorithms: negotiated,
+          timestamp: new Date().toISOString()
+        })
+      })
       .on('ready', () => {
+        if (this.isDev) {
+          console.log('SSH连接就绪:', {
+            host: this.config.host,
+            username: this.config.username,
+            timestamp: new Date().toISOString()
+          })
+        }
         this.isConnected = true
-        if (this.isDev) {
-          console.log(`SSH连接已就绪 (${this.config.host})`)
+        this.clearConnectTimeout()
+        this.emit('ready')
+      })
+      .on('error', (err: SSHError) => {
+        console.error('SSH错误:', {
+          message: err.message,
+          level: err.level,
+          code: err.code,
+          host: this.config.host,
+          username: this.config.username,
+          timestamp: new Date().toISOString()
+        })
+        this.isConnected = false
+        this.clearConnectTimeout()
+        
+        // 处理特定的错误类型
+        if (err.level === 'client-authentication') {
+          this.emit('error', new Error('SSH认证失败：用户名或密码错误'))
+        } else if (err.level === 'client-timeout') {
+          this.emit('error', new Error('SSH连接超时：请检查网络连接和防火墙设置'))
+        } else if (err.code === 'ECONNREFUSED') {
+          this.emit('error', new Error('SSH连接被拒绝：请检查主机地址和端口'))
+        } else {
+          this.emit('error', err)
         }
       })
-      .on('error', (err) => {
+      .once('close', () => {
+        console.log('SSH连接关闭:', {
+          host: this.config.host,
+          username: this.config.username,
+          timestamp: new Date().toISOString()
+        })
         this.isConnected = false
-        console.error('SSH连接错误:', err)
-        this.emit('error', err)
+        this.clearConnectTimeout()
+        this.emit('close')
       })
-      .on('close', () => {
+      .on('end', () => {
+        console.log('SSH连接结束:', {
+          host: this.config.host,
+          username: this.config.username,
+          timestamp: new Date().toISOString()
+        })
         this.isConnected = false
-        if (this.isDev) {
-          console.log(`SSH连接已关闭 (${this.config.host})`)
-        }
+        this.clearConnectTimeout()
+        this.emit('end')
       })
   }
 
-  connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('连接超时'))
-        this.client.end()
-      }, 10000)
+  private clearConnectTimeout() {
+    if (this.connectTimeout) {
+      clearTimeout(this.connectTimeout)
+      this.connectTimeout = null
+    }
+  }
 
-      this.client.on('ready', () => {
-        clearTimeout(timeout)
-        resolve()
-      }).on('error', (err) => {
-        clearTimeout(timeout)
-        reject(err)
-      })
+  async connect(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      // 设置连接超时
+      this.connectTimeout = setTimeout(() => {
+        const error = new Error('SSH连接超时：服务器无响应')
+        console.error('SSH连接超时:', {
+          host: this.config.host,
+          username: this.config.username,
+          timeout: this.CONNECT_TIMEOUT,
+          timestamp: new Date().toISOString()
+        })
+        this.client.end()
+        reject(error)
+      }, this.CONNECT_TIMEOUT)
 
       try {
+        console.log('开始SSH连接:', {
+          host: this.config.host,
+          username: this.config.username,
+          timestamp: new Date().toISOString()
+        })
+
         this.client.connect({
-          ...this.config,
-          readyTimeout: 10000,
-          keepaliveInterval: 10000
+          host: this.config.host,
+          port: this.config.port,
+          username: this.config.username,
+          password: this.config.password,
+          readyTimeout: this.HANDSHAKE_TIMEOUT,
+          debug: (debug: string) => {
+            if (this.isDev) {
+              console.log('SSH Debug:', {
+                message: debug,
+                host: this.config.host,
+                timestamp: new Date().toISOString()
+              })
+            }
+          }
+        })
+
+        this.client.once('ready', () => {
+          resolve()
+        })
+
+        this.client.once('error', (err) => {
+          this.clearConnectTimeout()
+          reject(err)
         })
       } catch (error) {
-        clearTimeout(timeout)
+        this.clearConnectTimeout()
         reject(error)
       }
     })
