@@ -130,7 +130,6 @@ const handleConnect = async (config: {
     const title = `${config.username}@${config.host}:${config.port}`
     let serverSessionId = ''
     const messageBuffer: any[] = [] // 用于缓存早期消息
-    let isAuthError = false // 标记是否是认证错误
     
     // 创建一个Promise来等待会话创建
     const sessionCreated = new Promise((resolve, reject) => {
@@ -139,8 +138,7 @@ const handleConnect = async (config: {
         console.error('会话创建超时，可能原因：', {
           wsConnected: wsService.isConnected(),
           hasServerResponse: !!serverSessionId,
-          bufferedMessages: messageBuffer.length,
-          isAuthError
+          bufferedMessages: messageBuffer.length
         })
         reject(new Error('会话创建超时'))
       }, 30000) // 30秒超时
@@ -150,8 +148,7 @@ const handleConnect = async (config: {
           removeServerCallback,
           serverSessionId,
           wsConnected: wsService.isConnected(),
-          timestamp: new Date().toISOString(),
-          isAuthError
+          timestamp: new Date().toISOString()
         })
         clearTimeout(timeout)
         // 按照注册的相反顺序清理回调
@@ -170,7 +167,6 @@ const handleConnect = async (config: {
           type: message.type,
           sessionId: message.sessionId,
           messageType: typeof message.data,
-          timestamp: new Date().toISOString(),
           error: message.error,
           errorMessage: message.message
         })
@@ -201,7 +197,6 @@ const handleConnect = async (config: {
         console.log('收到系统消息:', {
           type: data.type,
           message: data.message,
-          timestamp: new Date().toISOString(),
           error: data.error,
           wsConnected: wsService.isConnected()
         })
@@ -209,8 +204,7 @@ const handleConnect = async (config: {
         if (data.type === 'error') {
           console.error('SSH连接错误:', {
             message: data.message,
-            wsState: wsService.isConnected(),
-            timestamp: new Date().toISOString()
+            wsState: wsService.isConnected()
           })
 
           // 对于认证错误，显示错误消息但保持对话框打开
