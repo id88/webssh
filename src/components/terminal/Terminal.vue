@@ -36,7 +36,12 @@ onMounted(() => {
     theme: {
       background: '#1e1e1e',
       foreground: '#ffffff'
-    }
+    },
+    fontSize: 14,
+    letterSpacing: 0,
+    windowsMode: true,
+    rightClickSelectsWord: true,
+    allowProposedApi: true,
   })
 
   // 添加 FitAddon
@@ -89,7 +94,43 @@ defineExpose({
   width: 100%;
   height: 100%;
   background-color: #1e1e1e;
-  padding: 8px;
-  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+  padding-left: 5px;
+}
+
+/* 确保xterm.js终端完全填充容器 */
+:deep(.xterm) {
+  height: 100%;
+  width: 100%;
+  padding: 0;
+}
+
+/* 调整终端内容区域 */
+:deep(.xterm-screen) {
+  width: auto !important;
+  height: auto !important;
+}
+
+:deep(.xterm-viewport) {
+  overflow-y: auto !important;
+}
+
+/* 自定义滚动条样式 */
+:deep(.xterm-viewport::-webkit-scrollbar) {
+  width: 6px;
+}
+
+:deep(.xterm-viewport::-webkit-scrollbar-track) {
+  background: transparent;
+}
+
+:deep(.xterm-viewport::-webkit-scrollbar-thumb) {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+
+:deep(.xterm-viewport::-webkit-scrollbar-thumb:hover) {
+  background: rgba(255, 255, 255, 0.3);
 }
 </style> 

@@ -239,49 +239,87 @@ const handleTerminalResize = (size: { cols: number; rows: number }) => {
 
 <style scoped>
 .home-container {
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  display: flex;
+}
+
+.el-container {
+  width: 100%;
   height: 100%;
+}
+
+.el-aside {
+  height: 100%;
+  border-right: 1px solid var(--el-border-color-light);
+  background-color: var(--el-bg-color);
+  transition: width 0.3s;
+  overflow: hidden;
+  padding: 0;
 }
 
 .sidebar {
   height: 100%;
-  border-right: 1px solid #dcdfe6;
-  background-color: #f5f7fa;
+  display: flex;
+  flex-direction: column;
 }
 
 .sidebar-header {
-  padding: 16px;
-  border-bottom: 1px solid #dcdfe6;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--el-border-color-light);
+  background-color: var(--el-bg-color);
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .sidebar-header h2 {
   margin: 0;
   font-size: 1.2em;
+  color: var(--el-text-color-primary);
+}
+
+.el-scrollbar {
+  flex: 1;
+  height: calc(100% - 53px); /* 减去header高度 */
 }
 
 .session-list {
-  border-right: none;
+  border: none;
+  height: 100%;
 }
 
 .session-list .el-menu-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  padding: 0 16px;
+  height: 40px;
+  margin: 0;
 }
 
-.main-content {
-  padding: 20px;
+.session-list .el-menu-item span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-right: 8px;
+}
+
+.el-main {
+  padding: 0;
   height: 100%;
-  background-color: #f0f2f5;
+  background-color: var(--el-bg-color-page);
+  position: relative;
+  overflow: hidden;
 }
 
 .terminal-wrapper {
   height: 100%;
-  background-color: #fff;
-  border-radius: 8px;
-  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+  background-color: #1e1e1e;
+  position: relative;
   overflow: hidden;
 }
 
@@ -290,5 +328,29 @@ const handleTerminalResize = (size: { cols: number; rows: number }) => {
   display: flex;
   align-items: center;
   justify-content: center;
+  background-color: var(--el-bg-color);
+  margin: 0;
+}
+
+/* 响应式布局 */
+@media screen and (max-width: 768px) {
+  .el-aside {
+    width: 200px !important;
+  }
+  
+  .sidebar-header h2 {
+    font-size: 1em;
+  }
+  
+  .sidebar-header .el-button {
+    padding: 6px 10px;
+  }
+}
+
+/* 暗色主题适配 */
+@media (prefers-color-scheme: dark) {
+  .terminal-wrapper {
+    background-color: #000;
+  }
 }
 </style> 

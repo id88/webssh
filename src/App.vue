@@ -12,11 +12,23 @@ import { ElConfigProvider } from 'element-plus';
 html, body {
   margin: 0;
   padding: 0;
-  height: 100%;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
 #app {
-  height: 100%;
+  height: 100vh;
+  width: 100vw;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.el-config-provider {
+  height: 100vh;
+  width: 100vw;
+  display: block;
 }
 </style>
